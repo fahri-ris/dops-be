@@ -48,3 +48,14 @@ func (r *OrderItemRepository) GetByOrderID(ctx context.Context, orderID string) 
 	}
 	return items, rows.Err()
 }
+
+func (r *OrderItemRepository) CreateWithTx(ctx context.Context, tx *sql.Tx, item *domain.OrderItem) error {
+	query := `
+		INSERT INTO order_items (id, order_id, product_id, quantity, price)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	_, err := tx.ExecContext(ctx, query,
+		item.ID, item.OrderID, item.ProductID, item.Quantity, item.Price,
+	)
+	return err
+}

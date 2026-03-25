@@ -14,6 +14,8 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/fahri-ris/dops-be.git/order-service/internal/broker"
+	"github.com/fahri-ris/dops-be.git/order-service/internal/client"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/config"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/handler"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/middleware"
@@ -65,11 +67,39 @@ func main() {
 
 	logger.Info("Connected to database and Redis")
 
+	// Initialize NATS client for event publishing
+	natsClient, err := broker.NewNATSClient(cfg.NATSURL, logger)
+	if err != nil {
+		logger.Error("Failed to connect to NATS", "error", err)
+		os.Exit(1)
+	}
+	defer natsClient.Close()
+
+	// Initialize Payment client with mTLS
+	paymentClient, err := client.NewPaymentClient(
+		cfg.MTLSCert,
+		cfg.MTLSKey,
+		cfg.MTLSCert, // Using cert as CA for now - should be separate CA file in production
+		cfg.PaymentServiceURL,
+		logger,
+	)
+	if err != nil {
+		logger.Error("Failed to initialize payment client", "error", err)
+		os.Exit(1)
+	}
+
 	orderRepo := repository.NewOrderRepository(db)
 	orderItemRepo := repository.NewOrderItemRepository(db)
 	productRepo := repository.NewProductRepository(db, rdb)
 
-	orderService := service.NewOrderService(orderRepo, orderItemRepo, productRepo, logger)
+	orderService := service.NewOrderService(
+		orderRepo,
+		orderItemRepo,
+		productRepo,
+		paymentClient,
+		natsClient,
+		logger,
+	)
 
 	orderHandler := handler.NewOrderHandler(orderService, logger)
 	authHandler := handler.NewAuthHandler(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, logger)
