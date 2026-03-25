@@ -1,0 +1,27 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.sum
+.env
+
+# IDE
+.idea/
+.vscode/
+.claude
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local files
+PRD.md
+prd.md
+
+# Local folders
+docs
