@@ -15,6 +15,7 @@ import (
 
 	"github.com/fahri-ris/dops-be.git/order-service/internal/domain"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/middleware"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type PaymentClient struct {
@@ -79,9 +80,15 @@ func (c *PaymentClient) ProcessPayment(ctx context.Context, req domain.PaymentRe
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Inject trace context using OTel propagator
+	propagator := propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
+	propagator.Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
+
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Trace-ID", traceID)
-	httpReq.Header.Set("traceparent", formatTraceparent(traceID))
 
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -127,8 +134,4 @@ func (c *PaymentClient) ProcessPayment(ctx context.Context, req domain.PaymentRe
 		"status", paymentResp.Status)
 
 	return &paymentResp, nil
-}
-
-func formatTraceparent(traceID string) string {
-	return "00-" + traceID + "-01"
 }
