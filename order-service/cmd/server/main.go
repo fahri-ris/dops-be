@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/lib/pq"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -18,9 +19,11 @@ import (
 	"github.com/fahri-ris/dops-be.git/order-service/internal/client"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/config"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/handler"
+	"github.com/fahri-ris/dops-be.git/order-service/internal/metrics"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/middleware"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/repository"
 	"github.com/fahri-ris/dops-be.git/order-service/internal/service"
+	"github.com/fahri-ris/dops-be.git/order-service/internal/tracing"
 )
 
 func main() {
@@ -75,6 +78,19 @@ func main() {
 	}
 	defer natsClient.Close()
 
+	// Initialize OpenTelemetry tracer
+	tracer, err := tracing.NewTracer("order-service")
+	if err != nil {
+		logger.Error("Failed to initialize tracer", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tracer.Shutdown(ctx)
+	}()
+	logger.Info("OpenTelemetry tracer initialized")
+
 	// Initialize Payment client with mTLS
 	paymentClient, err := client.NewPaymentClient(
 		cfg.MTLSCert,
@@ -103,7 +119,7 @@ func main() {
 
 	orderHandler := handler.NewOrderHandler(orderService, logger)
 	authHandler := handler.NewAuthHandler(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, logger)
-	healthHandler := handler.NewHealthzHandler()
+	healthHandler := handler.NewHealthzHandler(db, rdb)
 
 	traceMiddleware := middleware.TraceMiddleware(logger)
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTSecret, logger)
@@ -114,22 +130,26 @@ func main() {
 		time.Duration(cfg.RateLimitWindowSec)*time.Second,
 		logger,
 	)
+	metricsMiddleware := metrics.Middleware("order-service")
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", healthHandler.Liveness)
 	mux.HandleFunc("/readyz", healthHandler.Readiness)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	authHandlerWithTrace := traceMiddleware(http.HandlerFunc(authHandler.Login))
 	mux.Handle("/api/v1/auth/login", authHandlerWithTrace)
 
 	var ordersHandler http.Handler = http.HandlerFunc(orderHandler.CreateOrder)
+	ordersHandler = metricsMiddleware(ordersHandler)
 	ordersHandler = traceMiddleware(ordersHandler)
 	ordersHandler = jwtMiddleware.Authenticate()(ordersHandler)
 	ordersHandler = rateLimitMiddleware.Limit()(ordersHandler)
 	mux.Handle("/api/v1/orders", ordersHandler)
 
 	var getOrderHandler http.Handler = http.HandlerFunc(orderHandler.GetOrder)
+	getOrderHandler = metricsMiddleware(getOrderHandler)
 	getOrderHandler = traceMiddleware(getOrderHandler)
 	getOrderHandler = jwtMiddleware.Authenticate()(getOrderHandler)
 	getOrderHandler = rateLimitMiddleware.Limit()(getOrderHandler)

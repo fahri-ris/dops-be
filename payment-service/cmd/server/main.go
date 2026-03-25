@@ -12,14 +12,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/lib/pq"
 	"github.com/joho/godotenv"
 
 	"github.com/fahri-ris/dops-be.git/payment-service/internal/config"
 	"github.com/fahri-ris/dops-be.git/payment-service/internal/handler"
+	"github.com/fahri-ris/dops-be.git/payment-service/internal/metrics"
 	"github.com/fahri-ris/dops-be.git/payment-service/internal/middleware"
 	"github.com/fahri-ris/dops-be.git/payment-service/internal/repository"
 	"github.com/fahri-ris/dops-be.git/payment-service/internal/service"
+	"github.com/fahri-ris/dops-be.git/payment-service/internal/tracing"
 )
 
 func main() {
@@ -57,21 +60,39 @@ func main() {
 
 	logger.Info("Connected to database")
 
+	// Initialize OpenTelemetry tracer
+	tracer, err := tracing.NewTracer("payment-service")
+	if err != nil {
+		logger.Error("Failed to initialize tracer", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tracer.Shutdown(ctx)
+	}()
+	logger.Info("OpenTelemetry tracer initialized")
+
 	paymentRepo := repository.NewPaymentRepository(db)
 
 	paymentService := service.NewPaymentService(paymentRepo, logger)
 
 	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
-	healthHandler := handler.NewHealthzHandler()
+	healthHandler := handler.NewHealthzHandler(db)
 
 	traceMiddleware := middleware.TraceMiddleware(logger)
+	metricsMiddleware := metrics.Middleware("payment-service")
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", healthHandler.Liveness)
 	mux.HandleFunc("/readyz", healthHandler.Readiness)
+	mux.Handle("/metrics", promhttp.Handler())
 
-	mux.HandleFunc("/payment/process", paymentHandler.ProcessPayment)
+	var paymentHandlerWithMiddleware http.Handler = http.HandlerFunc(paymentHandler.ProcessPayment)
+	paymentHandlerWithMiddleware = metricsMiddleware(paymentHandlerWithMiddleware)
+	paymentHandlerWithMiddleware = traceMiddleware(paymentHandlerWithMiddleware)
+	mux.Handle("/payment/process", paymentHandlerWithMiddleware)
 
 	var handler http.Handler = mux
 	handler = traceMiddleware(handler)
