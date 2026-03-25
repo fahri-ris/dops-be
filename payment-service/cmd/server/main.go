@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -74,18 +76,44 @@ func main() {
 	var handler http.Handler = mux
 	handler = traceMiddleware(handler)
 
+	// Build TLS config for mTLS
+	caCert, err := os.ReadFile(cfg.MTLSCA)
+	if err != nil {
+		logger.Error("Failed to read CA certificate", "error", err)
+		os.Exit(1)
+	}
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		logger.Error("Failed to add CA certificate to pool")
+		os.Exit(1)
+	}
+
+	tlsConfig := &tls.Config{
+		ClientCAs:  caCertPool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
+	}
+
 	server := &http.Server{
-		Addr:    ":" + cfg.ServerPort,
-		Handler: handler,
+		Addr:      ":" + cfg.ServerPort,
+		Handler:   handler,
+		TLSConfig: tlsConfig,
 	}
 
 	go func() {
-		logger.Info("Starting payment service", "port", cfg.ServerPort)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Info("Starting payment service with mTLS", "port", cfg.ServerPort)
+		if err := server.ListenAndServeTLS(cfg.MTLSCert, cfg.MTLSKey); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server error", "error", err)
 			os.Exit(1)
 		}
 	}()
+
+	// Verify server started successfully
+	logger.Info("Payment service mTLS configured",
+		"port", cfg.ServerPort,
+		"tls_min_version", "1.2",
+		"client_auth", "require_and_verify")
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

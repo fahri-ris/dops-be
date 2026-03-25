@@ -35,6 +35,9 @@ type Config struct {
 	MTLSCert string `env:"MTLS_CERT"`
 	MTLSKey  string `env:"MTLS_KEY"`
 
+	// Payment Service
+	PaymentServiceURL string `env:"PAYMENT_SERVICE_URL, default=https://localhost:8081"`
+
 	// Rate Limiting
 	RateLimitRequests  int `env:"RATE_LIMIT_REQUESTS, default=100"`
 	RateLimitWindowSec int `env:"RATE_LIMIT_WINDOW_SEC, default=60"`

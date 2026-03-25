@@ -50,3 +50,27 @@ func (r *OrderRepository) Update(ctx context.Context, order *domain.Order) error
 	_, err := r.db.ExecContext(ctx, query, order.Status, order.Total, order.UpdatedAt, order.ID)
 	return err
 }
+
+func (r *OrderRepository) CreateWithTx(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
+	query := `
+		INSERT INTO orders (id, user_id, status, total, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := tx.ExecContext(ctx, query,
+		order.ID, order.UserID, order.Status, order.Total, order.CreatedAt, order.UpdatedAt,
+	)
+	return err
+}
+
+func (r *OrderRepository) UpdateWithTx(ctx context.Context, tx *sql.Tx, order *domain.Order) error {
+	query := `
+		UPDATE orders SET status = $1, total = $2, updated_at = $3
+		WHERE id = $4
+	`
+	_, err := tx.ExecContext(ctx, query, order.Status, order.Total, order.UpdatedAt, order.ID)
+	return err
+}
+
+func (r *OrderRepository) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return r.db.BeginTx(ctx, nil)
+}

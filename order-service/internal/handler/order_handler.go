@@ -63,17 +63,15 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call service
-	input := domain.CreateOrderInput{}
-	for _, item := range req.Items {
-		input.Items = append(input.Items, struct {
-			ProductID string
-			Quantity  int
-			Price     float64
-		}{
+	input := domain.CreateOrderInput{
+		Items: make([]domain.OrderItemInput, len(req.Items)),
+	}
+	for i, item := range req.Items {
+		input.Items[i] = domain.OrderItemInput{
 			ProductID: item.ProductID,
 			Quantity:  item.Quantity,
 			Price:     item.Price,
-		})
+		}
 	}
 
 	order, err := h.orderService.CreateOrder(r.Context(), userID, input)

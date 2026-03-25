@@ -20,9 +20,10 @@ type Config struct {
 	DBName     string `env:"DB_NAME, default=dops"`
 	DBSchema   string `env:"DB_SCHEMA, default=payments"`
 
-	// mTLS
-	MTLSCert string `env:"MTLS_CERT"`
-	MTLSKey  string `env:"MTLS_KEY"`
+	// mTLS (required)
+	MTLSCert string `env:"MTLS_CERT, required"`
+	MTLSKey  string `env:"MTLS_KEY, required"`
+	MTLSCA   string `env:"MTLS_CA_CERT, required"` // CA cert to verify client certificates
 }
 
 func Load() *Config {
